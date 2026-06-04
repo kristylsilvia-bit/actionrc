@@ -1,0 +1,19 @@
+{
+  "name": "webcam-stream-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vercel/Next.js frontend for the Pi webcam stream",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "next": "^14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

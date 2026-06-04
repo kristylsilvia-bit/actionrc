@@ -1,0 +1,3 @@
+# The Pi server is not part of the Vercel deployment.
+pi-server
+pm2.config.js
