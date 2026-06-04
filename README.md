@@ -181,13 +181,11 @@ and **redeploy** for it to take effect.
 - `STREAM_PASSWORD=0` (or empty/unset): **no gate** — the stream shows
   immediately, no prompt.
 - `STREAM_PASSWORD=anything-else`: a password screen appears first. A wrong
-  password shows an error. A correct one stores a token in `localStorage` so
-  the viewer isn't prompted again on return visits.
+  password shows an error. A correct one unlocks the stream for that view only —
+  the prompt reappears on **every** page load and reload (auth is not persisted).
 
 The password is only ever checked **server-side** in `app/api/auth/route.js`; it
-is never shipped to the browser. The browser stores a SHA-256–derived token, not
-the password, and that token is re-validated on each visit. Changing
-`STREAM_PASSWORD` invalidates all existing tokens.
+is never shipped to the browser, and nothing is stored in the browser.
 
 > **Scope of the gate:** this protects the *page*. The Pi's `/stream` URL is
 > itself public, so anyone who knows it can open it directly. For a real lock,

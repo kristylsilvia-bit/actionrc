@@ -2,45 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const TOKEN_KEY = 'stream_token';
-
 export default function StreamView({ passwordRequired, streamUrl }) {
+  // Auth is kept only in memory and never persisted, so every page load and
+  // reload prompts for the password again (when one is configured).
   const [authed, setAuthed] = useState(!passwordRequired);
-  const [checking, setChecking] = useState(passwordRequired);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  // On revisit, validate any saved token against the server (the password
-  // itself never reaches the browser, only a hash-derived token does).
-  useEffect(() => {
-    if (!passwordRequired) return;
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) {
-      setChecking(false);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
-        if (cancelled) return;
-        if (res.ok) setAuthed(true);
-        else localStorage.removeItem(TOKEN_KEY);
-      } catch {
-        /* offline: fall through to the password form */
-      } finally {
-        if (!cancelled) setChecking(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [passwordRequired]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -53,9 +21,7 @@ export default function StreamView({ passwordRequired, streamUrl }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.token) {
-        localStorage.setItem(TOKEN_KEY, data.token);
+      if (res.ok) {
         setAuthed(true);
       } else {
         setError('Incorrect password');
@@ -66,14 +32,6 @@ export default function StreamView({ passwordRequired, streamUrl }) {
     } finally {
       setSubmitting(false);
     }
-  }
-
-  if (checking) {
-    return (
-      <main className="center">
-        <div className="spinner" />
-      </main>
-    );
   }
 
   if (!authed) {
@@ -87,7 +45,7 @@ export default function StreamView({ passwordRequired, streamUrl }) {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
             autoFocus
-            autoComplete="current-password"
+            autoComplete="off"
           />
           <button type="submit" disabled={submitting || !password}>
             {submitting ? '…' : 'Enter'}
