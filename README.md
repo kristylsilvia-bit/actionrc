@@ -193,7 +193,13 @@ initial credentials in `pm2.config.js`:
   memory, so it re-prompts on every load/reload — nothing is stored in the
   browser). The password is checked against the Pi's active (non-expired) list.
 - **Admin page (`/admin`)**: sign in with the admin password to:
-  - create/delete multiple viewer passwords, each with an optional expiry;
+  - create/delete multiple viewer passwords, each with an optional **hard
+    expiry**, a one-click **Auto / On / Off** switch (On = always active, Off =
+    disabled but kept), and a recurring weekly **schedule** (pick weekdays +
+    a start/end time, e.g. Mon–Fri 08:00–16:30). In `Auto` a password works
+    only inside its schedule; `On` overrides it (e.g. activate on a weekend),
+    `Off` disables it without deleting. Schedule times use the **Pi's local
+    timezone**;
   - draw **privacy blackout zones** on the video (drawn over the stream for all
     viewers — see the caveat below);
   - view live status (viewers, FPS, resolution, frames) and change

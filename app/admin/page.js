@@ -231,78 +231,104 @@ function Stat({ label, value }) {
   );
 }
 
+const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']; // Sun..Sat
+const DOW_FULL = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+const DEFAULT_SCHEDULE = { days: [1, 2, 3, 4, 5], start: '08:00', end: '16:30' };
+
 function PasswordsPanel({ config, save }) {
+  const tz = config.timezone || 'local';
+  const [rows, setRows] = useState(config.viewerPasswords);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [label, setLabel] = useState('');
   const [password, setPassword] = useState('');
   const [expires, setExpires] = useState('');
-  const [busy, setBusy] = useState(false);
 
-  async function add(e) {
-    e.preventDefault();
-    if (!password || busy) return;
+  useEffect(() => {
+    setRows(config.viewerPasswords);
+    setDirty(false);
+  }, [config.viewerPasswords]);
+
+  async function persist(list) {
     setBusy(true);
-    const expiresAt = expires ? new Date(expires).toISOString() : null;
-    const next = [
-      ...config.viewerPasswords.map(strip),
-      { label, password, expiresAt },
-    ];
-    await save({ viewerPasswords: next });
-    setLabel('');
-    setPassword('');
-    setExpires('');
+    await save({ viewerPasswords: list.map(strip) });
     setBusy(false);
   }
 
+  // Immediate single-click actions (mode toggle, add, delete). Each persists
+  // the whole current list, so any pending schedule edits are committed too.
+  async function setMode(id, mode) {
+    const next = rows.map((p) => (p.id === id ? { ...p, mode } : p));
+    setRows(next);
+    await persist(next);
+  }
   async function remove(id) {
-    await save({
-      viewerPasswords: config.viewerPasswords.filter((p) => p.id !== id).map(strip),
-    });
+    const next = rows.filter((p) => p.id !== id);
+    setRows(next);
+    await persist(next);
+  }
+  async function add(e) {
+    e.preventDefault();
+    if (!password || busy) return;
+    const next = [
+      ...rows,
+      {
+        id: `tmp-${Date.now()}`,
+        label,
+        password,
+        mode: 'auto',
+        schedule: null,
+        expiresAt: expires ? new Date(expires).toISOString() : null,
+      },
+    ];
+    setLabel('');
+    setPassword('');
+    setExpires('');
+    await persist(next);
+  }
+
+  // Staged schedule edits: update locally, commit with the button.
+  function edit(id, patch) {
+    setRows((rs) => rs.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    setDirty(true);
+  }
+  async function saveChanges() {
+    await persist(rows);
+    setDirty(false);
   }
 
   return (
     <section className="panel">
       <h2>Viewer passwords</h2>
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>Label</th>
-            <th>Password</th>
-            <th>Expires</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {config.viewerPasswords.length === 0 ? (
-            <tr>
-              <td colSpan={4} className="muted">
-                No passwords — nobody can log in.
-              </td>
-            </tr>
-          ) : null}
-          {config.viewerPasswords.map((p) => {
-            const expired =
-              p.expiresAt && new Date(p.expiresAt).getTime() <= Date.now();
-            return (
-              <tr key={p.id} className={expired ? 'expired' : ''}>
-                <td>{p.label || '—'}</td>
-                <td>
-                  <code>{p.password}</code>
-                </td>
-                <td>
-                  {p.expiresAt
-                    ? `${expired ? 'expired · ' : ''}${fmtDate(p.expiresAt)}`
-                    : 'never'}
-                </td>
-                <td>
-                  <button className="del" onClick={() => remove(p.id)} title="Delete">
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <p className="muted small">
+        Mode: <b>Auto</b> follows the schedule · <b>On</b> = always active ·{' '}
+        <b>Off</b> = disabled (kept, not deleted). Schedule times use the Pi&apos;s
+        timezone ({tz}).
+      </p>
+      <div className="pw-list">
+        {rows.length === 0 ? (
+          <p className="muted">No passwords — nobody can log in.</p>
+        ) : null}
+        {rows.map((p) => (
+          <PasswordCard key={p.id} p={p} onMode={setMode} onRemove={remove} onEdit={edit} />
+        ))}
+      </div>
+      {dirty ? (
+        <div className="row">
+          <button onClick={saveChanges} disabled={busy}>
+            Save schedule changes
+          </button>
+          <span className="muted small">unsaved schedule edits</span>
+        </div>
+      ) : null}
       <form className="addrow" onSubmit={add}>
         <input
           placeholder="Label (optional)"
@@ -310,7 +336,7 @@ function PasswordsPanel({ config, save }) {
           onChange={(e) => setLabel(e.target.value)}
         />
         <input
-          placeholder="Password"
+          placeholder="New password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
@@ -318,14 +344,117 @@ function PasswordsPanel({ config, save }) {
           type="datetime-local"
           value={expires}
           onChange={(e) => setExpires(e.target.value)}
-          title="Expiry (optional)"
+          title="Hard expiry (optional)"
         />
         <button type="submit" disabled={busy || !password}>
           Add
         </button>
       </form>
-      <p className="muted small">Leave expiry blank for a permanent password.</p>
+      <p className="muted small">
+        Expiry is a one-time hard cutoff; schedules recur weekly.
+      </p>
     </section>
+  );
+}
+
+function PasswordCard({ p, onMode, onRemove, onEdit }) {
+  const sched = p.schedule;
+
+  function toggleDay(d) {
+    const base = sched || DEFAULT_SCHEDULE;
+    const days = base.days.includes(d)
+      ? base.days.filter((x) => x !== d)
+      : [...base.days, d].sort();
+    onEdit(p.id, { schedule: { ...base, days } });
+  }
+  function setTime(field, val) {
+    const base = sched || DEFAULT_SCHEDULE;
+    onEdit(p.id, { schedule: { ...base, [field]: val } });
+  }
+
+  return (
+    <div className={`pw-card${p.active ? '' : ' off'}`}>
+      <div className="pw-head">
+        <span className={`pill ${p.active ? 'on' : 'off'}`}>
+          {p.active ? 'Active' : 'Inactive'}
+        </span>
+        <strong>{p.label || '—'}</strong>
+        <code>{p.password}</code>
+        <span className="spacer" />
+        {p.expiresAt ? (
+          <span className="muted small">expires {fmtDate(p.expiresAt)}</span>
+        ) : null}
+        <button className="del" title="Delete" onClick={() => onRemove(p.id)}>
+          ✕
+        </button>
+      </div>
+
+      <div className="pw-controls">
+        <div className="seg">
+          {['auto', 'on', 'off'].map((m) => (
+            <button
+              key={m}
+              className={p.mode === m ? 'active' : ''}
+              onClick={() => onMode(p.id, m)}
+            >
+              {m === 'auto' ? 'Auto' : m === 'on' ? 'On' : 'Off'}
+            </button>
+          ))}
+        </div>
+        {p.mode === 'on' ? <span className="muted small">always active</span> : null}
+        {p.mode === 'off' ? <span className="muted small">disabled</span> : null}
+      </div>
+
+      {p.mode === 'auto' ? (
+        <div className="pw-sched">
+          {sched ? (
+            <>
+              <div className="days">
+                {DOW.map((lab, d) => (
+                  <button
+                    key={d}
+                    className={sched.days.includes(d) ? 'on' : ''}
+                    onClick={() => toggleDay(d)}
+                    title={DOW_FULL[d]}
+                  >
+                    {lab}
+                  </button>
+                ))}
+              </div>
+              <label className="t">
+                from
+                <input
+                  type="time"
+                  value={sched.start}
+                  onChange={(e) => setTime('start', e.target.value)}
+                />
+              </label>
+              <label className="t">
+                to
+                <input
+                  type="time"
+                  value={sched.end}
+                  onChange={(e) => setTime('end', e.target.value)}
+                />
+              </label>
+              <button
+                className="ghost-btn small-btn"
+                onClick={() => onEdit(p.id, { schedule: null })}
+              >
+                Remove schedule
+              </button>
+            </>
+          ) : (
+            <button
+              className="ghost-btn small-btn"
+              onClick={() => onEdit(p.id, { schedule: { ...DEFAULT_SCHEDULE } })}
+            >
+              + Add schedule (always on without one)
+            </button>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -630,7 +759,14 @@ function AdminPwPanel({ save }) {
 // ── helpers ──
 function strip(p) {
   // Send only the fields the server cares about (keep id so it's stable).
-  return { id: p.id, label: p.label, password: p.password, expiresAt: p.expiresAt };
+  return {
+    id: p.id,
+    label: p.label,
+    password: p.password,
+    mode: p.mode,
+    schedule: p.schedule,
+    expiresAt: p.expiresAt,
+  };
 }
 function clamp01(n) {
   return Math.min(1, Math.max(0, n));

@@ -417,3 +417,112 @@ body {
   align-items: center;
   justify-content: center;
 }
+
+/* ── Password cards (mode + schedule) ── */
+.pw-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.pw-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+  background: #101012;
+}
+.pw-card.off {
+  opacity: 0.6;
+}
+.pw-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+.pw-head .spacer {
+  flex: 1;
+}
+.pw-head code {
+  background: #0e0e10;
+  padding: 0.1rem 0.4rem;
+  border-radius: 5px;
+  font-size: 0.85rem;
+}
+.pill {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.pill.on {
+  background: rgba(52, 199, 89, 0.18);
+  color: #46d369;
+}
+.pill.off {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+.pw-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: 0.6rem;
+  flex-wrap: wrap;
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.seg button {
+  padding: 0.35rem 0.75rem !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  color: var(--muted) !important;
+  font-size: 0.8rem;
+}
+.seg button.active {
+  background: #2a2a30 !important;
+  color: #fff !important;
+}
+.pw-sched {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.6rem;
+  flex-wrap: wrap;
+}
+.days {
+  display: inline-flex;
+  gap: 0.22rem;
+}
+.days button {
+  width: 26px;
+  height: 26px;
+  padding: 0 !important;
+  border-radius: 6px !important;
+  font-size: 0.72rem;
+  background: #0e0e10 !important;
+  color: var(--muted) !important;
+}
+.days button.on {
+  background: #2a7d46 !important;
+  color: #fff !important;
+  border-color: #2a7d46 !important;
+}
+.pw-sched .t {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.small-btn {
+  padding: 0.3rem 0.6rem !important;
+  font-size: 0.78rem;
+}

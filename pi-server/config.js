@@ -55,7 +55,9 @@ function defaultConfig() {
 function normalize(c) {
   c = c && typeof c === 'object' ? c : {};
   if (typeof c.adminPasswordHash !== 'string') c.adminPasswordHash = null;
-  c.viewerPasswords = Array.isArray(c.viewerPasswords) ? c.viewerPasswords : [];
+  c.viewerPasswords = (Array.isArray(c.viewerPasswords) ? c.viewerPasswords : []).map(
+    (p) => ({ mode: 'auto', schedule: null, ...p })
+  );
   c.privacyZones = Array.isArray(c.privacyZones) ? c.privacyZones : [];
   c.stream = c.stream && typeof c.stream === 'object' ? c.stream : {};
   c.stream.resolution = c.stream.resolution || process.env.RESOLUTION || '1280x720';
@@ -97,15 +99,49 @@ function checkAdminPassword(c, pw) {
   return !!h && !!pw && safeEqual(hash(pw), h);
 }
 
-function isActive(p) {
-  if (!p.expiresAt) return true;
-  const t = Date.parse(p.expiresAt);
-  return !isNaN(t) && t > Date.now();
+function isWithinSchedule(schedule, now) {
+  const d = new Date(now);
+  const day = d.getDay(); // 0=Sun .. 6=Sat, in the server's local time
+  if (!schedule.days.includes(day)) return false;
+  const mins = d.getHours() * 60 + d.getMinutes();
+  const [sh, sm] = schedule.start.split(':').map(Number);
+  const [eh, em] = schedule.end.split(':').map(Number);
+  const start = sh * 60 + sm;
+  const end = eh * 60 + em;
+  if (start <= end) return mins >= start && mins < end; // same-day window
+  return mins >= start || mins < end; // window wraps past midnight
+}
+
+// Whether a password works right now: hard expiry first, then the manual
+// mode (auto/on/off), then the recurring schedule when mode is 'auto'.
+function isActiveNow(p, now = Date.now()) {
+  if (p.expiresAt) {
+    const t = Date.parse(p.expiresAt);
+    if (!isNaN(t) && t <= now) return false; // expired = dead regardless of mode
+  }
+  if (p.mode === 'off') return false; // manually deactivated
+  if (p.mode === 'on') return true; // manually forced active
+  if (!p.schedule) return true; // 'auto' with no schedule = always on
+  return isWithinSchedule(p.schedule, now);
 }
 
 function checkViewerPassword(c, pw) {
   if (!pw) return false;
-  return c.viewerPasswords.some((p) => isActive(p) && safeEqual(p.password, pw));
+  return c.viewerPasswords.some((p) => isActiveNow(p) && safeEqual(p.password, pw));
+}
+
+// A schedule needs at least one weekday (0=Sun..6=Sat) and both HH:MM times,
+// otherwise it's dropped (null = no schedule, i.e. always on when mode is auto).
+function sanitizeSchedule(s) {
+  if (!s || typeof s !== 'object') return null;
+  const days = Array.isArray(s.days)
+    ? [...new Set(s.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort()
+    : [];
+  const time = (t) => (/^\d{1,2}:\d{2}$/.test(String(t)) ? String(t).padStart(5, '0') : null);
+  const start = time(s.start);
+  const end = time(s.end);
+  if (days.length === 0 || !start || !end) return null;
+  return { days, start, end };
 }
 
 function sanitizePasswords(arr) {
@@ -116,6 +152,8 @@ function sanitizePasswords(arr) {
       id: typeof p.id === 'string' && p.id ? p.id : crypto.randomUUID(),
       label: typeof p.label === 'string' ? p.label.slice(0, 60) : '',
       password: String(p.password).slice(0, 200),
+      mode: ['auto', 'on', 'off'].includes(p.mode) ? p.mode : 'auto',
+      schedule: sanitizeSchedule(p.schedule),
       expiresAt:
         p.expiresAt && !isNaN(Date.parse(p.expiresAt))
           ? new Date(p.expiresAt).toISOString()
@@ -150,11 +188,15 @@ function sanitizeZones(arr) {
 // Everything the admin panel may read. Includes viewer passwords in plaintext
 // (the admin needs to see/share them) but never the admin hash.
 function publicConfig(c) {
+  const now = Date.now();
   return {
-    viewerPasswords: c.viewerPasswords,
+    // attach a server-computed "active right now" flag for the UI to display
+    viewerPasswords: c.viewerPasswords.map((p) => ({ ...p, active: isActiveNow(p, now) })),
     privacyZones: c.privacyZones,
     stream: c.stream,
     adminConfigured: adminHash(c) != null,
+    serverTime: new Date(now).toISOString(),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
   };
 }
 
@@ -167,6 +209,8 @@ module.exports = {
   adminToken,
   checkAdminPassword,
   checkViewerPassword,
+  isActiveNow,
+  isWithinSchedule,
   sanitizePasswords,
   sanitizeZones,
   publicConfig,
