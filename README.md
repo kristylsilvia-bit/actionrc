@@ -115,6 +115,13 @@ Useful pm2 commands: `pm2 logs pi-stream-server`, `pm2 restart pi-stream-server`
 **Low-CPU tip:** if `v4l2-ctl --list-formats-ext` shows the camera supports MJPEG,
 set `INPUT_FORMAT=mjpeg` and `COPY=1` in `pm2.config.js` to skip re-encoding.
 
+### Test without a camera
+
+Set `SOURCE=test` to serve a synthetic moving test pattern instead of the
+camera — handy for validating the server, network, and frontend before any
+hardware is connected. Switch back to `SOURCE=camera` (the default) for the
+real device. Requires ffmpeg but no `/dev/video0`.
+
 ### Binding vs. the internal IP
 
 The server binds to `0.0.0.0` so it answers on the LAN address

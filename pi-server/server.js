@@ -29,12 +29,23 @@ const QUALITY = process.env.QUALITY || '5'; // ffmpeg -q:v (2 = best, 31 = worst
 const INPUT_FORMAT = process.env.INPUT_FORMAT || ''; // e.g. "mjpeg" or "yuyv422"
 const COPY = process.env.COPY === '1'; // copy native MJPEG instead of re-encoding
 const LAN_IP = process.env.LAN_IP || '192.168.0.186'; // informational only
+const SOURCE = (process.env.SOURCE || 'camera').toLowerCase(); // 'camera' or 'test'
 
 const SOI = Buffer.from([0xff, 0xd8]); // JPEG "Start Of Image" marker
 const BOUNDARY = 'mjpegstream';
 
 function buildFfmpegArgs() {
-  const args = ['-hide_banner', '-loglevel', 'error', '-f', 'v4l2'];
+  const args = ['-hide_banner', '-loglevel', 'error'];
+
+  if (SOURCE === 'test') {
+    // Synthetic moving test pattern. Lets you validate the whole pipeline
+    // (server, network, frontend) before a real camera is connected.
+    args.push('-f', 'lavfi', '-i', `testsrc=size=${RESOLUTION}:rate=${FRAMERATE}`);
+    args.push('-f', 'image2pipe', '-vcodec', 'mjpeg', '-q:v', QUALITY, '-');
+    return args;
+  }
+
+  args.push('-f', 'v4l2');
   if (INPUT_FORMAT) args.push('-input_format', INPUT_FORMAT);
   args.push('-framerate', FRAMERATE, '-video_size', RESOLUTION, '-i', VIDEO_DEVICE);
   args.push('-f', 'image2pipe');
@@ -187,10 +198,11 @@ const app = express();
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
+    source: SOURCE,
     streaming: broadcaster.streaming,
     clients: broadcaster.clients.size,
     frames: broadcaster.frames,
-    device: VIDEO_DEVICE,
+    device: SOURCE === 'test' ? 'testsrc' : VIDEO_DEVICE,
     resolution: RESOLUTION,
     framerate: FRAMERATE,
     lanIp: LAN_IP,
