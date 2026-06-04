@@ -183,3 +183,237 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* ── Privacy zones (viewer overlay) ── */
+.zones {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3;
+}
+.zone {
+  position: absolute;
+  background: #000;
+}
+
+/* ── Admin ── */
+.admin {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+}
+.admin-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+.admin-top h1 {
+  font-size: 1.25rem;
+  margin: 0;
+}
+.admin-top .spacer {
+  flex: 1;
+}
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.1rem 1.25rem 1.25rem;
+  margin-bottom: 1.1rem;
+}
+.panel h2 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 0.9rem;
+  color: #d8d8de;
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 0.8rem;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.85rem;
+}
+
+/* buttons + inputs */
+.admin button,
+.ghost-btn {
+  padding: 0.5rem 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #fff;
+  background: #2a2a30;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.admin button:hover:not(:disabled),
+.ghost-btn:hover {
+  background: #34343c;
+}
+.admin button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ghost-btn {
+  background: transparent;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+.admin input,
+.admin select {
+  padding: 0.5rem 0.6rem;
+  font-size: 0.9rem;
+  color: var(--fg);
+  background: #0e0e10;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+}
+.admin input:focus,
+.admin select:focus {
+  border-color: #4a4a52;
+}
+.del {
+  padding: 0.25rem 0.5rem !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+  border-color: transparent !important;
+}
+.del:hover {
+  color: var(--accent) !important;
+}
+
+/* stats */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.75rem;
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.stat-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.stat-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* tables */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.tbl th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.75rem;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.tbl td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.tbl code {
+  background: #0e0e10;
+  padding: 0.1rem 0.4rem;
+  border-radius: 5px;
+  font-size: 0.85rem;
+}
+.tbl tr.expired {
+  opacity: 0.5;
+}
+.addrow {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.9rem;
+}
+.addrow input {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* settings grid */
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+}
+.grid2 label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.grid2 .row {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+/* zone editor */
+.editor-stage {
+  position: relative;
+  width: 100%;
+  height: 52vh;
+  max-height: 460px;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  user-select: none;
+}
+.editor-stream {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+}
+.editor-overlay {
+  position: absolute;
+  cursor: crosshair;
+  touch-action: none;
+}
+.ezone {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+.ezone.draft {
+  background: rgba(255, 59, 48, 0.25);
+  border-color: var(--accent);
+}
+.ezone-del {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 20px;
+  height: 20px;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  font-size: 0.7rem;
+  line-height: 1;
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { piBase, streamUrl } from './lib/pi';
+import { useContainRect } from './lib/contain';
 
-export default function StreamView({ passwordRequired, streamUrl }) {
-  // Auth is kept only in memory and never persisted, so every page load and
-  // reload prompts for the password again (when one is configured).
-  const [authed, setAuthed] = useState(!passwordRequired);
+export default function StreamView() {
+  const PI = piBase();
+  const STREAM = streamUrl();
+  const [authed, setAuthed] = useState(false);
+  const [zones, setZones] = useState([]);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -16,12 +19,14 @@ export default function StreamView({ passwordRequired, streamUrl }) {
     setSubmitting(true);
     setError('');
     try {
-      const res = await fetch('/api/auth', {
+      const res = await fetch(`${PI}/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setZones(Array.isArray(data.zones) ? data.zones : []);
         setAuthed(true);
       } else {
         setError('Incorrect password');
@@ -56,18 +61,19 @@ export default function StreamView({ passwordRequired, streamUrl }) {
     );
   }
 
-  return <Stream streamUrl={streamUrl} />;
+  return <Stream streamUrl={STREAM} zones={zones} />;
 }
 
-function Stream({ streamUrl }) {
+function Stream({ streamUrl, zones }) {
+  const stageRef = useRef(null);
+  const retryRef = useRef(null);
   const [offline, setOffline] = useState(false);
   const [bust, setBust] = useState(0);
-  const retryRef = useRef(null);
+  const [aspect, setAspect] = useState(16 / 9);
+  const rect = useContainRect(stageRef, aspect);
 
   useEffect(() => () => clearTimeout(retryRef.current), []);
 
-  // MJPEG renders natively in an <img>. A cache-buster is appended only when we
-  // need to force a reconnect after an error.
   const src = bust
     ? `${streamUrl}${streamUrl.includes('?') ? '&' : '?'}_=${bust}`
     : streamUrl;
@@ -76,13 +82,20 @@ function Stream({ streamUrl }) {
     setOffline(true);
     clearTimeout(retryRef.current);
     retryRef.current = setTimeout(() => {
-      setOffline(false); // optimistically clear, then force a reconnect
+      setOffline(false);
       setBust(Date.now());
     }, 4000);
   }
 
+  function handleLoad(e) {
+    setOffline(false);
+    const w = e.currentTarget.naturalWidth;
+    const h = e.currentTarget.naturalHeight;
+    if (w && h) setAspect(w / h);
+  }
+
   return (
-    <main className="stage">
+    <main className="stage" ref={stageRef}>
       <div className={`badge${offline ? ' offline' : ''}`}>
         <span className="dot" />
         {offline ? 'OFFLINE' : 'LIVE'}
@@ -92,8 +105,32 @@ function Stream({ streamUrl }) {
         src={src}
         alt="Live stream"
         onError={handleError}
-        onLoad={() => setOffline(false)}
+        onLoad={handleLoad}
       />
+      {rect && zones.length > 0 ? (
+        <div
+          className="zones"
+          style={{
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          }}
+        >
+          {zones.map((z, i) => (
+            <div
+              key={z.id || i}
+              className="zone"
+              style={{
+                left: `${z.x * 100}%`,
+                top: `${z.y * 100}%`,
+                width: `${z.w * 100}%`,
+                height: `${z.h * 100}%`,
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
       {offline ? <div className="overlay">Reconnecting…</div> : null}
     </main>
   );

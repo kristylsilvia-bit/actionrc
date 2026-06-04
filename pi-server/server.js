@@ -1,62 +1,59 @@
 'use strict';
 
 /**
- * Raspberry Pi MJPEG stream server.
+ * Raspberry Pi MJPEG stream server with an admin-managed config.
  *
- * Captures /dev/video0 with ffmpeg and serves it as an MJPEG stream that any
- * browser can render in a plain <img> tag.
+ *   GET  /stream         MJPEG stream (multipart/x-mixed-replace)
+ *   GET  /health         public JSON status
+ *   POST /auth           viewer login -> { ok, zones } (checks active passwords)
+ *   POST /admin/login    admin login  -> { ok, token }
+ *   GET  /admin/config   read full config (admin token required)
+ *   POST /admin/config   update passwords / zones / stream / admin password
+ *   POST /admin/restart  restart the capture pipeline
  *
- *   GET /stream  -> multipart/x-mixed-replace MJPEG stream
- *   GET /health  -> JSON status
- *   GET /        -> tiny test page
- *
- * A SINGLE ffmpeg process is started on the first viewer and shared (fanned
- * out) to every connected client. This matters because a v4l2 device like
- * /dev/video0 can usually only be opened by one process at a time, so spawning
- * one ffmpeg per viewer would fail with "device busy" on the second tab.
- * ffmpeg is stopped automatically when the last viewer disconnects.
+ * A single shared ffmpeg is fanned out to all viewers (a v4l2 device can only
+ * be opened once). It starts on the first viewer and stops when the last one
+ * leaves. Stream settings (resolution/fps/quality) live in the config file so
+ * the admin can change them at runtime.
  */
 
 const express = require('express');
 const { spawn } = require('child_process');
+const cfg = require('./config');
 
 const PORT = parseInt(process.env.PORT || '2638', 10);
-const HOST = process.env.HOST || '0.0.0.0'; // bind all interfaces -> reachable externally
+const HOST = process.env.HOST || '0.0.0.0';
 const VIDEO_DEVICE = process.env.VIDEO_DEVICE || '/dev/video0';
-const FRAMERATE = process.env.FRAMERATE || '15';
-const RESOLUTION = process.env.RESOLUTION || '1280x720';
-const QUALITY = process.env.QUALITY || '5'; // ffmpeg -q:v (2 = best, 31 = worst)
-const INPUT_FORMAT = process.env.INPUT_FORMAT || ''; // e.g. "mjpeg" or "yuyv422"
-const COPY = process.env.COPY === '1'; // copy native MJPEG instead of re-encoding
-const LAN_IP = process.env.LAN_IP || '192.168.0.186'; // informational only
+const INPUT_FORMAT = process.env.INPUT_FORMAT || '';
+const COPY = process.env.COPY === '1';
+const LAN_IP = process.env.LAN_IP || '192.168.0.186';
 const SOURCE = (process.env.SOURCE || 'camera').toLowerCase(); // 'camera' or 'test'
 
-const SOI = Buffer.from([0xff, 0xd8]); // JPEG "Start Of Image" marker
+const SOI = Buffer.from([0xff, 0xd8]); // JPEG Start Of Image marker
 const BOUNDARY = 'mjpegstream';
 
+let config = cfg.load();
+
 function buildFfmpegArgs() {
+  const { resolution, framerate, quality } = config.stream;
   const args = ['-hide_banner', '-loglevel', 'error'];
 
   if (SOURCE === 'test') {
-    // Synthetic moving test pattern. Lets you validate the whole pipeline
-    // (server, network, frontend) before a real camera is connected.
-    args.push('-f', 'lavfi', '-i', `testsrc=size=${RESOLUTION}:rate=${FRAMERATE}`);
-    args.push('-f', 'image2pipe', '-vcodec', 'mjpeg', '-q:v', QUALITY, '-');
+    args.push('-f', 'lavfi', '-i', `testsrc=size=${resolution}:rate=${framerate}`);
+    args.push('-f', 'image2pipe', '-vcodec', 'mjpeg', '-q:v', String(quality), '-');
     return args;
   }
 
   args.push('-f', 'v4l2');
   if (INPUT_FORMAT) args.push('-input_format', INPUT_FORMAT);
-  args.push('-framerate', FRAMERATE, '-video_size', RESOLUTION, '-i', VIDEO_DEVICE);
+  args.push('-framerate', String(framerate), '-video_size', resolution, '-i', VIDEO_DEVICE);
   args.push('-f', 'image2pipe');
   if (COPY) {
-    // No re-encode: lowest CPU, requires the camera to output MJPEG natively
-    // (pair with INPUT_FORMAT=mjpeg).
     args.push('-vcodec', 'copy');
   } else {
-    args.push('-vcodec', 'mjpeg', '-q:v', QUALITY);
+    args.push('-vcodec', 'mjpeg', '-q:v', String(quality));
   }
-  args.push('-'); // write to stdout
+  args.push('-');
   return args;
 }
 
@@ -96,7 +93,6 @@ class MjpegBroadcaster {
     this.ffmpeg = proc;
 
     proc.stdout.on('data', (chunk) => this.onData(chunk));
-
     proc.stderr.on('data', (d) => {
       const msg = d.toString().trim();
       if (msg) {
@@ -104,17 +100,16 @@ class MjpegBroadcaster {
         console.error(`[ffmpeg] ${msg}`);
       }
     });
-
     proc.on('error', (err) => {
       this.lastError = err.message;
       console.error(`[ffmpeg] spawn error: ${err.message}`);
     });
-
     proc.on('close', (code, signal) => {
       console.error(`[ffmpeg] exited code=${code} signal=${signal}`);
       this.ffmpeg = null;
       this.buffer = Buffer.alloc(0);
-      // End every client response so browsers reconnect (which restarts ffmpeg).
+      // End every client so browsers reconnect (which restarts ffmpeg with the
+      // current settings — this is also how runtime setting changes apply).
       for (const res of this.clients) {
         try {
           res.end();
@@ -138,23 +133,25 @@ class MjpegBroadcaster {
     this.buffer = Buffer.alloc(0);
   }
 
-  /**
-   * ffmpeg's image2pipe output is just complete JPEG frames concatenated back
-   * to back. Each frame starts with the SOI marker (0xFFD8). We split on SOI:
-   * everything from one SOI up to (but not including) the next SOI is exactly
-   * one complete JPEG. 0xFFD8 never appears inside JPEG entropy data, so this
-   * is reliable across ffmpeg versions.
-   */
+  // Apply new stream settings: if running, drop the current ffmpeg so viewers
+  // reconnect and pick up the new resolution/fps/quality.
+  applySettings() {
+    if (this.ffmpeg) {
+      try {
+        this.ffmpeg.kill('SIGKILL');
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   onData(chunk) {
     this.buffer = Buffer.concat([this.buffer, chunk]);
-
     let start = this.buffer.indexOf(SOI);
     if (start === -1) {
-      // Haven't seen a frame start yet; guard against unbounded growth.
       if (this.buffer.length > 5 * 1024 * 1024) this.buffer = Buffer.alloc(0);
       return;
     }
-
     let next = this.buffer.indexOf(SOI, start + 2);
     while (next !== -1) {
       const frame = this.buffer.subarray(start, next);
@@ -163,19 +160,14 @@ class MjpegBroadcaster {
       start = next;
       next = this.buffer.indexOf(SOI, start + 2);
     }
-
-    // Keep the trailing partial frame for the next chunk.
     this.buffer = this.buffer.subarray(start);
   }
 
   broadcast(frame) {
     const header = Buffer.from(
-      `--${BOUNDARY}\r\n` +
-        `Content-Type: image/jpeg\r\n` +
-        `Content-Length: ${frame.length}\r\n\r\n`
+      `--${BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`
     );
     const tail = Buffer.from('\r\n');
-
     for (const res of this.clients) {
       if (res.writableEnded) {
         this.clients.delete(res);
@@ -195,6 +187,27 @@ class MjpegBroadcaster {
 const broadcaster = new MjpegBroadcaster();
 const app = express();
 
+app.use(express.json({ limit: '256kb' }));
+
+// CORS: the browser on the Vercel origin calls /auth and /admin/* directly.
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Vary', 'Origin');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+function requireAdmin(req, res, next) {
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const expected = cfg.adminToken(config);
+  if (expected && token && cfg.safeEqual(token, expected)) return next();
+  return res.status(401).json({ ok: false, error: 'unauthorized' });
+}
+
+// ── Public ──
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -203,12 +216,15 @@ app.get('/health', (req, res) => {
     clients: broadcaster.clients.size,
     frames: broadcaster.frames,
     device: SOURCE === 'test' ? 'testsrc' : VIDEO_DEVICE,
-    resolution: RESOLUTION,
-    framerate: FRAMERATE,
+    resolution: config.stream.resolution,
+    framerate: config.stream.framerate,
+    quality: config.stream.quality,
     lanIp: LAN_IP,
     port: PORT,
     uptime: Math.round(process.uptime()),
     lastError: broadcaster.lastError,
+    adminConfigured: cfg.adminHash(config) != null,
+    viewerPasswords: config.viewerPasswords.length,
   });
 });
 
@@ -220,12 +236,79 @@ app.get('/stream', (req, res) => {
     Connection: 'close',
     'Access-Control-Allow-Origin': '*',
   });
-
   broadcaster.addClient(res);
   req.on('close', () => broadcaster.removeClient(res));
 });
 
-// Minimal self-test page, handy when you hit the Pi directly.
+app.post('/auth', (req, res) => {
+  const password =
+    req.body && typeof req.body.password === 'string' ? req.body.password : '';
+  if (cfg.checkViewerPassword(config, password)) {
+    return res.json({ ok: true, zones: config.privacyZones });
+  }
+  return res.status(401).json({ ok: false });
+});
+
+// ── Admin ──
+app.post('/admin/login', (req, res) => {
+  const password =
+    req.body && typeof req.body.password === 'string' ? req.body.password : '';
+  if (cfg.checkAdminPassword(config, password)) {
+    return res.json({ ok: true, token: cfg.adminToken(config) });
+  }
+  return res.status(401).json({ ok: false });
+});
+
+app.get('/admin/config', requireAdmin, (req, res) => {
+  res.json({ ok: true, ...cfg.publicConfig(config) });
+});
+
+app.post('/admin/config', requireAdmin, (req, res) => {
+  const body = req.body || {};
+  let streamChanged = false;
+  let adminChanged = false;
+
+  if (Array.isArray(body.viewerPasswords)) {
+    config.viewerPasswords = cfg.sanitizePasswords(body.viewerPasswords);
+  }
+  if (Array.isArray(body.privacyZones)) {
+    config.privacyZones = cfg.sanitizeZones(body.privacyZones);
+  }
+  if (body.stream && typeof body.stream === 'object') {
+    const ns = body.stream;
+    if (ns.resolution && /^\d{2,5}x\d{2,5}$/.test(String(ns.resolution))) {
+      config.stream.resolution = String(ns.resolution);
+    }
+    if (ns.framerate && /^\d{1,3}$/.test(String(ns.framerate))) {
+      config.stream.framerate = String(ns.framerate);
+    }
+    if (ns.quality && /^\d{1,2}$/.test(String(ns.quality))) {
+      config.stream.quality = String(ns.quality);
+    }
+    streamChanged = true;
+  }
+  if (typeof body.adminPassword === 'string' && body.adminPassword.length > 0) {
+    config.adminPasswordHash = cfg.hash(body.adminPassword);
+    adminChanged = true;
+  }
+
+  cfg.save(config);
+  if (streamChanged) broadcaster.applySettings();
+
+  res.json({
+    ok: true,
+    adminChanged,
+    token: adminChanged ? cfg.adminToken(config) : undefined,
+    ...cfg.publicConfig(config),
+  });
+});
+
+app.post('/admin/restart', requireAdmin, (req, res) => {
+  broadcaster.applySettings();
+  res.json({ ok: true });
+});
+
+// Tiny self-test page when you hit the Pi directly.
 app.get('/', (req, res) => {
   res
     .type('html')
@@ -243,15 +326,16 @@ app.get('/', (req, res) => {
 const server = app.listen(PORT, HOST, () => {
   console.log(`Pi stream server listening on http://${HOST}:${PORT}`);
   console.log(`LAN address: http://${LAN_IP}:${PORT}  (stream: /stream, health: /health)`);
+  if (cfg.adminHash(config) == null) {
+    console.warn('[admin] No admin password set. Set ADMIN_PASSWORD to use /admin.');
+  }
 });
 
 function shutdown(signal) {
   console.log(`\n${signal} received, shutting down`);
   broadcaster.stop();
   server.close(() => process.exit(0));
-  // Don't hang forever if a socket is stuck.
   setTimeout(() => process.exit(0), 2000).unref();
 }
-
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));

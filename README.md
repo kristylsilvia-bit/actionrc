@@ -8,23 +8,22 @@ A two-part live webcam setup:
   shows the stream full-screen with a `LIVE` badge, behind an optional password.
 
 ```
-┌──────────────────────┐        MJPEG over HTTP        ┌────────────────────────┐
-│  Browser (viewer)    │  ───────────────────────────▶ │  Pi @ 104.229.7.78:2638 │
-│  Vercel page <img/>  │    GET /stream                │  (LAN 192.168.0.186)    │
-│                      │                               │  ffmpeg /dev/video0     │
+┌──────────────────────┐   GET /stream (MJPEG)         ┌────────────────────────┐
+│  Browser (viewer)    │  ───────────────────────────▶ │  Pi stream server       │
+│  Vercel page <img/>  │   POST /auth, /admin/*  ─────▶ │  (ffmpeg /dev/video0)   │
+│  + /admin dashboard  │   GET /health                 │  + config.local.json    │
 └──────────────────────┘                               └────────────────────────┘
-         ▲
+         ▲                                                 (reached via the tunnel)
          │  HTTPS  (the page itself is served by Vercel)
          │
 ┌──────────────────────┐
-│  Vercel (Next.js)    │
-│  password gate +     │
-│  /api/auth           │
+│  Vercel (Next.js)    │   serves the UI only; the browser calls the Pi directly
 └──────────────────────┘
 ```
 
-The `<img>` points straight at the Pi (`NEXT_PUBLIC_STREAM_URL`); video never
-flows through Vercel.
+The page and `<img>` point straight at the Pi (`NEXT_PUBLIC_STREAM_URL`); video
+and auth never flow through Vercel. The Pi owns all state (passwords, zones,
+settings) in `config.local.json`.
 
 ---
 
@@ -33,13 +32,15 @@ flows through Vercel.
 ```
 .
 ├── app/                  # Next.js frontend (App Router)
-│   ├── api/auth/route.js #   server-side password check (password stays server-side)
-│   ├── page.js           #   decides whether to show the gate
-│   ├── StreamView.js     #   gate + stream UI (client component)
+│   ├── page.js           #   viewer entry
+│   ├── StreamView.js     #   password gate + stream UI + privacy overlays
+│   ├── admin/page.js     #   admin dashboard (passwords, zones, settings)
+│   ├── lib/              #   shared helpers (stream URL, contain-rect hook)
 │   ├── layout.js
 │   └── globals.css
 ├── pi-server/            # Raspberry Pi stream server
-│   ├── server.js
+│   ├── server.js         #   stream + auth + admin endpoints
+│   ├── config.js         #   persistent config (passwords, zones, settings)
 │   └── package.json
 ├── pm2.config.js         # pm2 process config for the Pi
 ├── vercel.json
@@ -166,30 +167,46 @@ Directory change needed. The `pi-server/` folder is excluded via `.vercelignore`
 
 ### Environment variables (Vercel dashboard)
 
-Set these under **Project → Settings → Environment Variables**, then redeploy:
+Set this under **Project → Settings → Environment Variables**, then redeploy:
 
-| Var                      | Example                              | Purpose                                    |
-| ------------------------ | ------------------------------------ | ------------------------------------------ |
-| `STREAM_PASSWORD`        | `hunter2`                            | Password gate (see below).                 |
-| `NEXT_PUBLIC_STREAM_URL` | `http://104.229.7.78:2638/stream`    | Stream URL the browser loads.              |
+| Var                      | Example                                      | Purpose                                            |
+| ------------------------ | -------------------------------------------- | -------------------------------------------------- |
+| `NEXT_PUBLIC_STREAM_URL` | `https://your-tunnel.trycloudflare.com/stream` | Stream URL the browser loads. The frontend derives the Pi API base from it (strip `/stream`). |
 
 `NEXT_PUBLIC_STREAM_URL` is embedded into the client at build time — change it
 and **redeploy** for it to take effect.
 
-### Password behaviour
+Passwords are no longer a Vercel env var — they're managed on the Pi (see below).
 
-- `STREAM_PASSWORD=0` (or empty/unset): **no gate** — the stream shows
-  immediately, no prompt.
-- `STREAM_PASSWORD=anything-else`: a password screen appears first. A wrong
-  password shows an error. A correct one unlocks the stream for that view only —
-  the prompt reappears on **every** page load and reload (auth is not persisted).
+### Auth & the admin panel
 
-The password is only ever checked **server-side** in `app/api/auth/route.js`; it
-is never shipped to the browser, and nothing is stored in the browser.
+Viewer passwords, the admin password, privacy zones, and stream settings live on
+the **Pi** in `pi-server/config.local.json` (created on first run). Set the
+initial credentials in `pm2.config.js`:
 
-> **Scope of the gate:** this protects the *page*. The Pi's `/stream` URL is
-> itself public, so anyone who knows it can open it directly. For a real lock,
-> put the Pi behind auth at the network edge (see below).
+| Var               | Purpose                                                        |
+| ----------------- | ------------------------------------------------------------- |
+| `STREAM_PASSWORD` | Seeds the first viewer password on first run.                 |
+| `ADMIN_PASSWORD`  | Protects `/admin`; also the recovery fallback if you forget.  |
+
+- **Viewer page (`/`)**: always prompts for a password (auth is kept only in
+  memory, so it re-prompts on every load/reload — nothing is stored in the
+  browser). The password is checked against the Pi's active (non-expired) list.
+- **Admin page (`/admin`)**: sign in with the admin password to:
+  - create/delete multiple viewer passwords, each with an optional expiry;
+  - draw **privacy blackout zones** on the video (drawn over the stream for all
+    viewers — see the caveat below);
+  - view live status (viewers, FPS, resolution, frames) and change
+    resolution / framerate / quality or restart the stream;
+  - change the admin password (this invalidates the current admin session).
+
+The browser talks to the Pi directly (CORS) using the tunnel URL. The admin
+token is kept in `sessionStorage` (survives reload, cleared on tab close).
+
+> **Privacy zones are a browser overlay**, not baked into the video. They hide
+> areas on the page, but someone who opens the raw `/stream` URL directly would
+> still see the full frame. For true redaction the masking has to happen on the
+> Pi (ffmpeg `drawbox`) — ask if you want to switch to that.
 
 ---
 

@@ -30,6 +30,8 @@ module.exports = {
         HOST: '0.0.0.0', // bind all interfaces (keeps it externally reachable)
         PORT: 2638, // listen port (forwarded from the public IP)
         LAN_IP: '192.168.0.186', // Pi's internal IP (reference / health output)
+        STREAM_PASSWORD: 'changeme', // seeds the first viewer password on first run (config.local.json)
+        ADMIN_PASSWORD: 'change-this-admin', // protects /admin (also the recovery fallback)
         SOURCE: 'camera', // 'camera' = /dev/video0; set 'test' for a synthetic pattern (no camera)
         VIDEO_DEVICE: '/dev/video0',
         FRAMERATE: '15',
