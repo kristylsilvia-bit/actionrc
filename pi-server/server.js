@@ -24,8 +24,6 @@ const cfg = require('./config');
 const PORT = parseInt(process.env.PORT || '2638', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const VIDEO_DEVICE = process.env.VIDEO_DEVICE || '/dev/video0';
-const INPUT_FORMAT = process.env.INPUT_FORMAT || '';
-const COPY = process.env.COPY === '1';
 const LAN_IP = process.env.LAN_IP || '192.168.0.186';
 const SOURCE = (process.env.SOURCE || 'camera').toLowerCase(); // 'camera' or 'test'
 
@@ -35,7 +33,7 @@ const BOUNDARY = 'mjpegstream';
 let config = cfg.load();
 
 function buildFfmpegArgs() {
-  const { resolution, framerate, quality } = config.stream;
+  const { resolution, framerate, quality, encode, inputFormat } = config.stream;
   const args = ['-hide_banner', '-loglevel', 'error'];
 
   if (SOURCE === 'test') {
@@ -45,11 +43,13 @@ function buildFfmpegArgs() {
   }
 
   args.push('-f', 'v4l2');
-  if (INPUT_FORMAT) args.push('-input_format', INPUT_FORMAT);
+  // Native passthrough (encode='copy') needs the camera's own MJPEG input.
+  const inFmt = inputFormat || (encode === 'copy' ? 'mjpeg' : '');
+  if (inFmt) args.push('-input_format', inFmt);
   args.push('-framerate', String(framerate), '-video_size', resolution, '-i', VIDEO_DEVICE);
   args.push('-f', 'image2pipe');
-  if (COPY) {
-    args.push('-vcodec', 'copy');
+  if (encode === 'copy') {
+    args.push('-vcodec', 'copy'); // no re-encode: lowest CPU, camera's native quality
   } else {
     args.push('-vcodec', 'mjpeg', '-q:v', String(quality));
   }
@@ -284,6 +284,10 @@ app.post('/admin/config', requireAdmin, (req, res) => {
     }
     if (ns.quality && /^\d{1,2}$/.test(String(ns.quality))) {
       config.stream.quality = String(ns.quality);
+    }
+    if (['mjpeg', 'copy'].includes(ns.encode)) config.stream.encode = ns.encode;
+    if (typeof ns.inputFormat === 'string' && /^[a-z0-9]{0,16}$/i.test(ns.inputFormat)) {
+      config.stream.inputFormat = ns.inputFormat;
     }
     streamChanged = true;
   }

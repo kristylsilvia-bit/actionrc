@@ -61,10 +61,10 @@ export default function StreamView() {
     );
   }
 
-  return <Stream streamUrl={STREAM} zones={zones} />;
+  return <Stream streamUrl={STREAM} zones={zones} pi={PI} />;
 }
 
-function Stream({ streamUrl, zones }) {
+function Stream({ streamUrl, zones, pi }) {
   const stageRef = useRef(null);
   const retryRef = useRef(null);
   const [offline, setOffline] = useState(false);
@@ -73,6 +73,61 @@ function Stream({ streamUrl, zones }) {
   const rect = useContainRect(stageRef, aspect);
 
   useEffect(() => () => clearTimeout(retryRef.current), []);
+
+  // Watchdog: an MJPEG <img> can stall silently (tunnel hiccup, dropped socket,
+  // overloaded Pi) without firing onError. Poll /health and force a reconnect
+  // when the server is unreachable, idle (our socket died), or producing no new
+  // frames. Also drives the OFFLINE badge.
+  useEffect(() => {
+    let stop = false;
+    let prevFrames = null;
+    let lastAdvance = Date.now();
+    let lastReconnect = 0;
+    let idle = 0;
+    let reachable = true;
+    function reconnect() {
+      const now = Date.now();
+      if (now - lastReconnect < 8000) return; // cooldown so we never loop
+      lastReconnect = now;
+      setOffline(false);
+      setBust(now);
+    }
+    async function tick() {
+      try {
+        const r = await fetch(`${pi}/health`, { cache: 'no-store' });
+        if (stop) return;
+        if (!r.ok) throw new Error('health');
+        const h = await r.json();
+        if (!reachable) {
+          reachable = true;
+          reconnect();
+          return;
+        }
+        if (h.frames !== prevFrames) {
+          prevFrames = h.frames;
+          lastAdvance = Date.now();
+        }
+        if (!h.streaming) {
+          idle += 1;
+          if (idle >= 2) reconnect(); // our connection isn't registered server-side
+          return;
+        }
+        idle = 0;
+        if (Date.now() - lastAdvance > 8000) reconnect(); // streaming but no new frames
+      } catch {
+        if (stop) return;
+        reachable = false;
+        idle = 0;
+        setOffline(true);
+      }
+    }
+    tick();
+    const id = setInterval(tick, 3000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, [pi]);
 
   const src = bust
     ? `${streamUrl}${streamUrl.includes('?') ? '&' : '?'}_=${bust}`
@@ -84,7 +139,7 @@ function Stream({ streamUrl, zones }) {
     retryRef.current = setTimeout(() => {
       setOffline(false);
       setBust(Date.now());
-    }, 4000);
+    }, 1500);
   }
 
   function handleLoad(e) {

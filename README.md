@@ -202,8 +202,9 @@ initial credentials in `pm2.config.js`:
     timezone**;
   - draw **privacy blackout zones** on the video (drawn over the stream for all
     viewers — see the caveat below);
-  - view live status (viewers, FPS, resolution, frames) and change
-    resolution / framerate / quality or restart the stream;
+  - view live status (viewers, FPS, resolution, frames) and change the
+    **capture mode** (re-encode vs native MJPEG passthrough), resolution,
+    framerate, quality, or restart the stream;
   - change the admin password (this invalidates the current admin session).
 
 The browser talks to the Pi directly (CORS) using the tunnel URL. The admin

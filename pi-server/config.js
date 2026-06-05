@@ -48,6 +48,8 @@ function defaultConfig() {
       resolution: process.env.RESOLUTION || '1280x720',
       framerate: process.env.FRAMERATE || '15',
       quality: process.env.QUALITY || '5',
+      encode: process.env.COPY === '1' ? 'copy' : 'mjpeg',
+      inputFormat: process.env.INPUT_FORMAT || '',
     },
   };
 }
@@ -63,6 +65,15 @@ function normalize(c) {
   c.stream.resolution = c.stream.resolution || process.env.RESOLUTION || '1280x720';
   c.stream.framerate = c.stream.framerate || process.env.FRAMERATE || '15';
   c.stream.quality = c.stream.quality || process.env.QUALITY || '5';
+  c.stream.encode = ['mjpeg', 'copy'].includes(c.stream.encode)
+    ? c.stream.encode
+    : process.env.COPY === '1'
+      ? 'copy'
+      : 'mjpeg';
+  c.stream.inputFormat =
+    typeof c.stream.inputFormat === 'string'
+      ? c.stream.inputFormat
+      : process.env.INPUT_FORMAT || '';
   return c;
 }
 

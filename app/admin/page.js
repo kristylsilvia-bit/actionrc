@@ -617,6 +617,7 @@ function StreamPanel({ config, save, authedFetch }) {
   const [resolution, setResolution] = useState(config.stream.resolution);
   const [framerate, setFramerate] = useState(config.stream.framerate);
   const [quality, setQuality] = useState(config.stream.quality);
+  const [encode, setEncode] = useState(config.stream.encode || 'mjpeg');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -624,12 +625,13 @@ function StreamPanel({ config, save, authedFetch }) {
     setResolution(config.stream.resolution);
     setFramerate(config.stream.framerate);
     setQuality(config.stream.quality);
+    setEncode(config.stream.encode || 'mjpeg');
   }, [config.stream]);
 
   async function apply() {
     setBusy(true);
     setMsg('');
-    await save({ stream: { resolution, framerate, quality } });
+    await save({ stream: { resolution, framerate, quality, encode } });
     setMsg('Applied — viewers reconnect automatically.');
     setBusy(false);
   }
@@ -644,11 +646,19 @@ function StreamPanel({ config, save, authedFetch }) {
   const resolutions = ['640x480', '1280x720', '1920x1080', config.stream.resolution].filter(
     (v, i, a) => a.indexOf(v) === i
   );
+  const native = encode === 'copy';
 
   return (
     <section className="panel">
       <h2>Stream settings</h2>
       <div className="grid2">
+        <label>
+          Capture mode
+          <select value={encode} onChange={(e) => setEncode(e.target.value)}>
+            <option value="mjpeg">Re-encode (adjustable quality)</option>
+            <option value="copy">Native MJPEG — best quality, lowest CPU</option>
+          </select>
+        </label>
         <label>
           Resolution
           <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
@@ -677,6 +687,7 @@ function StreamPanel({ config, save, authedFetch }) {
             max="31"
             value={quality}
             onChange={(e) => setQuality(e.target.value)}
+            disabled={native}
           />
         </label>
       </div>
@@ -690,7 +701,9 @@ function StreamPanel({ config, save, authedFetch }) {
         {msg ? <span className="muted small">{msg}</span> : null}
       </div>
       <p className="muted small">
-        Resolution/quality apply only when re-encoding (not in COPY mode).
+        {native
+          ? 'Native streams the camera’s own MJPEG (needs camera MJPEG support at this size/fps). Best quality, almost no Pi CPU.'
+          : 'Re-encoding lets you tune quality but uses Pi CPU — high fps + big resolution can overload the Pi and cause freezing.'}
       </p>
     </section>
   );
